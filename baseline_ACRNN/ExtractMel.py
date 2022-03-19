@@ -1,3 +1,5 @@
+#!/usr/bin/env python2
+# -*- coding: utf-8 -*-
 """
 Created on Tue Jan  9 20:32:28 2018
 
@@ -9,18 +11,15 @@ import numpy as np
 import python_speech_features as ps
 import os
 import glob
-import pickle
+import cPickle
 #import base
 #import sigproc
-
 eps = 1e-5
-
 def wgn(x, snr):
     snr = 10**(snr/10.0)
     xpower = np.sum(x**2)/len(x)
     npower = xpower / snr
     return np.random.randn(len(x)) * np.sqrt(npower)
-
 def getlogspec(signal,samplerate=16000,winlen=0.02,winstep=0.01,
                nfilt=26,nfft=399,lowfreq=0,highfreq=None,preemph=0.97,
                winfunc=lambda x:np.ones((x,))):
@@ -29,7 +28,6 @@ def getlogspec(signal,samplerate=16000,winlen=0.02,winstep=0.01,
     frames = ps.sigproc.framesig(signal, winlen*samplerate, winstep*samplerate, winfunc)
     pspec = ps.sigproc.logpowspec(frames,nfft)
     return pspec 
-
 def read_file(filename):
     file = wave.open(filename,'r')    
     params = file.getparams()
@@ -40,7 +38,6 @@ def read_file(filename):
     time = np.arange(0,wav_length) * (1.0/framerate)
     file.close()
     return wavedata, time, framerate
-
 def dense_to_one_hot(labels_dense, num_classes):
   """Convert class labels from scalars to one-hot vectors."""
   num_labels = labels_dense.shape[0]
@@ -67,7 +64,6 @@ def normalization(data):
     std = np.std(data,axis=0)
     data = (data-mean)/std
     return data
-
 def mapminmax(data):
     shape = np.array(data.shape,dtype = np.int32)
     for i in range(shape[0]):
@@ -75,7 +71,6 @@ def mapminmax(data):
         max = np.max(data[i,:,:,0])
         data[i,:,:,0] = (data[i,:,:,0] - min)/((max - min)+eps)
     return data
-
 def generate_label(emotion,classnum):
     label = -1
     if(emotion == 'ang'):
@@ -91,11 +86,10 @@ def generate_label(emotion,classnum):
     else:
         label = 5
     return label
-
 def load_data():
     f = open('./zscore40.pkl','rb')
-    mean1, std1, mean2, std2, mean3, std3 = pickle.load(f)
-    return mean1, std1, mean2, std2, mean3, std3
+    mean1,std1,mean2,std2,mean3,std3 = cPickle.load(f)
+    return mean1,std1,mean2,std2,mean3,std3
         
         
 def read_IEMOCAP():
@@ -108,9 +102,9 @@ def read_IEMOCAP():
     filter_num = 40
     pernums_test = np.arange(tnum)#remerber each utterance contain how many segments
     pernums_valid = np.arange(vnum)
-    rootdir = 'IEMOCAP_full_release'
+    rootdir = '/home/jamhan/hxj/datasets/IEMOCAP_full_release'
     
-    mean1, std1, mean2, std2, mean3, std3 = load_data()
+    mean1,std1,mean2,std2,mean3,std3 = load_data()
     
     #2774
     hapnum = 434#2
@@ -119,24 +113,23 @@ def read_IEMOCAP():
     sadnum = 799#1
     pernum = 300#np.min([hapnum,angnum,sadnum,neunum])
     #valid_num = divmod((train_num),10)[0]
-    train_label = np.empty((train_num, 1), dtype=np.int8)
-    test_label = np.empty((tnum, 1), dtype=np.int8)
-    valid_label = np.empty((vnum, 1), dtype=np.int8)
-    Test_label = np.empty((test_num, 1), dtype=np.int8)
-    Valid_label = np.empty((valid_num, 1), dtype=np.int8)
-    train_data = np.empty((train_num, 300, filter_num, 3), dtype=np.float32)
-    test_data = np.empty((test_num, 300, filter_num, 3), dtype=np.float32)
-    valid_data = np.empty((valid_num, 300, filter_num, 3), dtype=np.float32)
+    train_label = np.empty((train_num,1), dtype = np.int8)
+    test_label = np.empty((tnum,1), dtype = np.int8)
+    valid_label = np.empty((vnum,1), dtype = np.int8)
+    Test_label = np.empty((test_num,1), dtype = np.int8)
+    Valid_label = np.empty((valid_num,1), dtype = np.int8)
+    train_data = np.empty((train_num,300,filter_num,3),dtype = np.float32)
+    test_data = np.empty((test_num,300,filter_num,3),dtype = np.float32)
+    valid_data = np.empty((valid_num,300,filter_num,3),dtype = np.float32)
     
     tnum = 0
     vnum = 0
     train_num = 0
     test_num = 0
     valid_num = 0
-    train_emt = {'hap':0, 'ang':0, 'neu':0, 'sad':0 }
-    test_emt = {'hap':0, 'ang':0, 'neu':0, 'sad':0 }
-    valid_emt = {'hap':0, 'ang':0, 'neu':0, 'sad':0 }
-
+    train_emt = {'hap':0,'ang':0,'neu':0,'sad':0 }
+    test_emt = {'hap':0,'ang':0,'neu':0,'sad':0 }
+    valid_emt = {'hap':0,'ang':0,'neu':0,'sad':0 }
     for speaker in os.listdir(rootdir):
         if(speaker[0] == 'S'):
             sub_dir = os.path.join(rootdir,speaker,'sentences/wav')
@@ -154,7 +147,7 @@ def read_IEMOCAP():
                             if(line[0] == '['):
                                 t = line.split()
                                 emot_map[t[3]] = t[4]
-
+                                
         
                     file_dir = os.path.join(sub_dir, sess, '*.wav')
                     files = glob.glob(file_dir)
@@ -311,6 +304,8 @@ def read_IEMOCAP():
                         else:
                             pass
     
+    
+    
     hap_index = np.arange(hapnum)
     neu_index = np.arange(neunum)
     sad_index = np.arange(sadnum)
@@ -357,8 +352,8 @@ def read_IEMOCAP():
         neu_label = train_label[neu_index[0:pernum]].copy()
         train_num = 4*pernum
     
-        Train_label = np.empty((train_num,1), dtype=np.int8)
-        Train_data = np.empty((train_num,300,filter_num,3), dtype=np.float32)
+        Train_label = np.empty((train_num,1), dtype = np.int8)
+        Train_data = np.empty((train_num,300,filter_num,3),dtype = np.float32)
         Train_data[0:pernum] = hap_data
         Train_label[0:pernum] = hap_label
         Train_data[pernum:2*pernum] = sad_data
@@ -372,20 +367,21 @@ def read_IEMOCAP():
         np.random.shuffle(arr)
         Train_data = Train_data[arr[0:]]
         Train_label = Train_label[arr[0:]]
-        print(train_label.shape)
-        print(train_emt)
-        print(test_emt)
-        print(valid_emt)
+        print train_label.shape
+        print train_emt
+        print test_emt
+        print valid_emt
         #print test_label[0:500,:]
         #f=open('./CASIA_40_delta.pkl','wb') 
         #output = './IEMOCAP40.pkl'
         output = './IEMOCAP.pkl'
-        f = open(output,'wb') 
-        # pickle.dump((Train_data, Train_label, test_data, test_label, valid_data, valid_label, Valid_label, Test_label, pernums_test, pernums_valid), f, protocol=2)
-        pickle.dump((Train_data, Train_label, test_data, test_label, valid_data, valid_label, Valid_label, Test_label, pernums_test, pernums_valid), f)
+        f=open(output,'wb') 
+        cPickle.dump((Train_data,Train_label,test_data,test_label,valid_data,valid_label,Valid_label,Test_label,pernums_test,pernums_valid),f)
         f.close()           
     return
-              
+                
+        
+
 
 if __name__=='__main__':
     read_IEMOCAP()

@@ -1,5 +1,15 @@
+#!/usr/bin/env python2
+# -*- coding: utf-8 -*-
 """
 Created on Mon Jan 15 16:23:45 2018
+
+@author: hxj
+"""
+
+#!/usr/bin/env python2
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jan  9 20:32:28 2018
 
 @author: hxj
 """
@@ -9,18 +19,15 @@ import numpy as np
 import python_speech_features as ps
 import os
 import glob
-import pickle
+import cPickle
 #import base
 #import sigproc
-
 eps = 1e-5
-
 def wgn(x, snr):
     snr = 10**(snr/10.0)
     xpower = np.sum(x**2)/len(x)
     npower = xpower / snr
     return np.random.randn(len(x)) * np.sqrt(npower)
-
 def getlogspec(signal,samplerate=16000,winlen=0.02,winstep=0.01,
                nfilt=26,nfft=399,lowfreq=0,highfreq=None,preemph=0.97,
                winfunc=lambda x:np.ones((x,))):
@@ -29,7 +36,6 @@ def getlogspec(signal,samplerate=16000,winlen=0.02,winstep=0.01,
     frames = ps.sigproc.framesig(signal, winlen*samplerate, winstep*samplerate, winfunc)
     pspec = ps.sigproc.logpowspec(frames,nfft)
     return pspec 
-
 def read_file(filename):
     file = wave.open(filename,'r')    
     params = file.getparams()
@@ -40,7 +46,6 @@ def read_file(filename):
     time = np.arange(0,wav_length) * (1.0/framerate)
     file.close()
     return wavedata, time, framerate
-
 def dense_to_one_hot(labels_dense, num_classes):
   """Convert class labels from scalars to one-hot vectors."""
   num_labels = labels_dense.shape[0]
@@ -67,7 +72,6 @@ def normalization(data):
     std = np.std(data,axis=0)
     data = (data-mean)/std
     return data
-
 def mapminmax(data):
     shape = np.array(data.shape,dtype = np.int32)
     for i in range(shape[0]):
@@ -75,7 +79,6 @@ def mapminmax(data):
         max = np.max(data[i,:,:,0])
         data[i,:,:,0] = (data[i,:,:,0] - min)/((max - min)+eps)
     return data
-
 def generate_label(emotion,classnum):
     label = -1
     if(emotion == 'ang'):
@@ -91,24 +94,26 @@ def generate_label(emotion,classnum):
     else:
         label = 5
     return label
-                
+        
+        
 def read_IEMOCAP():
+    
     train_num = 2928
     filter_num = 40
-    rootdir = 'IEMOCAP_full_release'
+    rootdir = '/home/jamhan/hxj/datasets/IEMOCAP_full_release'
     traindata1 = np.empty((train_num*300,filter_num),dtype=np.float32)
     traindata2 = np.empty((train_num*300,filter_num),dtype=np.float32)
     traindata3 = np.empty((train_num*300,filter_num),dtype=np.float32)
     train_num = 0
     
+    
     for speaker in os.listdir(rootdir):
-        if(speaker[0] == 'S'):   # Session1 ~ Session5
+        if(speaker[0] == 'S'):
             sub_dir = os.path.join(rootdir,speaker,'sentences/wav')
             emoevl = os.path.join(rootdir,speaker,'dialog/EmoEvaluation')
-
             for sess in os.listdir(sub_dir):
                 if(sess[7] == 'i'):
-                    emotdir = emoevl + '/' + sess+ '.txt'
+                    emotdir = emoevl+'/'+sess+'.txt'
                     #emotfile = open(emotdir)
                     emot_map = {}
                     with open(emotdir,'r') as emot_to_read:
@@ -120,6 +125,7 @@ def read_IEMOCAP():
                                 t = line.split()
                                 emot_map[t[3]] = t[4]
                                 
+        
                     file_dir = os.path.join(sub_dir, sess, '*.wav')
                     files = glob.glob(file_dir)
                     for filename in files:
@@ -149,7 +155,7 @@ def read_IEMOCAP():
                                       em = generate_label(emotion,6)
                                       train_num = train_num + 1
                                  else:
-
+                                      
                                      if(emotion in ['ang','neu','sad']):
                                          
                                          for i in range(2):
@@ -168,9 +174,9 @@ def read_IEMOCAP():
                                              traindata3[train_num*300:(train_num+1)*300] = delta21
                                              train_num = train_num + 1
                                      else:
-                                        frames = divmod(time-300, 100)[0] + 1
+                                        frames = divmod(time-300,100)[0] + 1
                                         for i in range(frames):
-                                            begin = 100 * i
+                                            begin = 100*i
                                             end = begin + 300
                                             part = mel_spec[begin:end,:]
                                             delta11 = delta1[begin:end,:]
@@ -188,16 +194,16 @@ def read_IEMOCAP():
                             pass
     
     
-        mean1 = np.mean(traindata1, axis=0)#axis=0纵轴方向求均值
-        std1 = np.std(traindata1, axis=0)
-        mean2 = np.mean(traindata2, axis=0)#axis=0纵轴方向求均值
-        std2 = np.std(traindata2, axis=0)
-        mean3 = np.mean(traindata3, axis=0)#axis=0纵轴方向求均值
-        std3 = np.std(traindata3, axis=0)
-        output = './zscore' + str(filter_num) + '.pkl'
+        mean1 = np.mean(traindata1,axis=0)#axis=0纵轴方向求均值
+        std1 = np.std(traindata1,axis=0)
+        mean2 = np.mean(traindata2,axis=0)#axis=0纵轴方向求均值
+        std2 = np.std(traindata2,axis=0)
+        mean3 = np.mean(traindata3,axis=0)#axis=0纵轴方向求均值
+        std3 = np.std(traindata3,axis=0)
+        output = './zscore'+str(filter_num)+'.pkl'
         #output = './IEMOCAP'+str(m)+'_'+str(filter_num)+'.pkl'
-        f=open(output, 'wb') 
-        pickle.dump((mean1, std1, mean2, std2, mean3, std3), f)
+        f=open(output,'wb') 
+        cPickle.dump((mean1,std1,mean2,std2,mean3,std3),f)
         f.close()           
     return
                 
