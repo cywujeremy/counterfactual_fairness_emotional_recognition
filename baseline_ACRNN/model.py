@@ -11,13 +11,14 @@ from __future__ import division
 #from __future__ import print_function
 
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 from acrnn1 import acrnn
-import cPickle
+import _pickle as cPickle
 from sklearn.metrics import recall_score as recall
 from sklearn.metrics import confusion_matrix as confusion
 import os
 
+tf.disable_eager_execution()
 tf.app.flags.DEFINE_integer('num_epoch', 5000, 'The number of epoches for training.')
 tf.app.flags.DEFINE_integer('num_classes', 4, 'The number of emotion classes.')
 tf.app.flags.DEFINE_integer('batch_size', 60, 'The number of samples in each batch.')

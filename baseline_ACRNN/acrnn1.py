@@ -8,7 +8,7 @@ Created on Thu Jul 19 14:54:52 2018
 
 
 
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 from attention import attention
 
 epsilon = 1e-3
@@ -94,32 +94,32 @@ def acrnn(inputs, num_classes=4,
     layer1 = tf.nn.bias_add(layer1,layer1_bias)
     layer1 = leaky_relu(layer1, 0.01)
     layer1 = tf.nn.max_pool(layer1,ksize=[1, 2, 4, 1], strides=[1, 2, 4, 1], padding='VALID', name='max_pool')
-    layer1 = tf.contrib.layers.dropout(layer1, keep_prob=dropout_keep_prob, is_training=is_training)
+    layer1 = tf.layers.dropout(layer1, dropout_keep_prob)
     
     layer2 = tf.nn.conv2d(layer1, layer2_filter, layer2_stride, padding='SAME')
     layer2 = tf.nn.bias_add(layer2,layer2_bias)
     layer2 = leaky_relu(layer2, 0.01)
-    layer2 = tf.contrib.layers.dropout(layer2, keep_prob=dropout_keep_prob, is_training=is_training)
+    layer2 = tf.nn.dropout(layer2, dropout_keep_prob)
     
     layer3 = tf.nn.conv2d(layer2, layer3_filter, layer3_stride, padding='SAME')
     layer3 = tf.nn.bias_add(layer3,layer3_bias)
     layer3 = leaky_relu(layer3, 0.01)
-    layer3 = tf.contrib.layers.dropout(layer3, keep_prob=dropout_keep_prob, is_training=is_training)
+    layer3 = tf.nn.dropout(layer3, dropout_keep_prob)
     
     layer4 = tf.nn.conv2d(layer3, layer4_filter, layer4_stride, padding='SAME')
     layer4 = tf.nn.bias_add(layer4,layer4_bias)
     layer4 = leaky_relu(layer4, 0.01)
-    layer4 = tf.contrib.layers.dropout(layer4, keep_prob=dropout_keep_prob, is_training=is_training)
+    layer4 = tf.nn.dropout(layer4, dropout_keep_prob)
     
     layer5 = tf.nn.conv2d(layer4, layer5_filter, layer5_stride, padding='SAME')
     layer5 = tf.nn.bias_add(layer5,layer5_bias)
     layer5 = leaky_relu(layer5, 0.01)    
-    layer5 = tf.contrib.layers.dropout(layer5, keep_prob=dropout_keep_prob, is_training=is_training)
+    layer5 = tf.nn.dropout(layer5, dropout_keep_prob)
 
     layer6 = tf.nn.conv2d(layer5, layer6_filter, layer6_stride, padding='SAME')
     layer6 = tf.nn.bias_add(layer6,layer6_bias)
     layer6 = leaky_relu(layer6, 0.01)    
-    layer6 = tf.contrib.layers.dropout(layer6, keep_prob=dropout_keep_prob, is_training=is_training)
+    layer6 = tf.nn.dropout(layer6, dropout_keep_prob)
     
     layer6 = tf.reshape(layer6,[-1,time_step,L2*p])
     layer6 = tf.reshape(layer6, [-1,p*L2])
@@ -134,9 +134,9 @@ def acrnn(inputs, num_classes=4,
     
     # Define lstm cells with tensorflow
     # Forward direction cell
-    gru_fw_cell1 = tf.contrib.rnn.BasicLSTMCell(cell_units, forget_bias=1.0)
+    gru_fw_cell1 = tf.nn.rnn_cell.BasicLSTMCell(cell_units, forget_bias=1.0)
     # Backward direction cell
-    gru_bw_cell1 = tf.contrib.rnn.BasicLSTMCell(cell_units, forget_bias=1.0)
+    gru_bw_cell1 = tf.nn.rnn_cell.BasicLSTMCell(cell_units, forget_bias=1.0)
     
     # Now we feed `layer_3` into the LSTM BRNN cell and obtain the LSTM BRNN output.
     outputs1, output_states1 = tf.nn.bidirectional_dynamic_rnn(cell_fw=gru_fw_cell1,
