@@ -2,6 +2,7 @@ import os
 import glob
 import pickle
 import wave
+from tqdm import tqdm
 import numpy as np
 import python_speech_features as psf
 
@@ -67,28 +68,67 @@ class IEMOCAP_Dataset:
                             label_map[t[3]] = t[4]
         return label_map
         
-    def _gen_features(self, utter_path):
+    def _gen_features(self, utter_path, feat_type='logfbank', delta=2):
         """Generate features from .wav files
         """
-        # TODO: extract MFCC and deltas from wav files
-        raise NotImplementedError
+        # TODO: extract MFCC/LogFBank and deltas from wav files
+        with wave.open(utter_path, 'r') as f:
+            
+            nchannels, sampwidth, framerate, wav_length = f.getparams()[:4]
+            data = np.frombuffer(f.readframes(wav_length), dtype=np.short)
+            time = np.arange(0,wav_length) * (1.0/framerate)
         
+        mel_spec = psf.logfbank(data, framerate, nfilt=40)
+        delta1 = psf.delta(mel_spec, 2)
+        delta2 = psf.delta(delta1, 2)
         
+        return np.stack((mel_spec, delta1, delta2), axis=1)
+            
     
     def _gen_labels(self, utter_name):
         """Generate labels from label map
         """
         return self.label_map[utter_name]
 
-    def make_dataset(self):
+    def make_dataset(self, train_val_split='default'):
         """save (label, feature) tuples to file system
         """
         # TODO: organize and output label and feature tuples to file system
-        raise NotImplementedError
         
+        train_output_path = os.path.join(self.output_root, 'train')
+        dev_output_path = os.path.join(self.output_root, 'dev')
+        test_output_path = os.path.join(self.output_root, 'test')
+        
+        if train_val_split == 'default':
+            
+            train_sessions = ['Ses01', 'Ses02', 'Ses03']
+            dev_sessions = ['Ses04']
+            test_sessions = ['Ses05']
+            
+            train_wav_idx = [i for i in range(len(self.utterance_list)) if self.utterance_list[i][:5] in train_sessions]
+            dev_wav_idx = [i for i in range(len(self.utterance_list)) if self.utterance_list[i][:5] in dev_sessions]
+            test_wav_idx = [i for i in range(len(self.utterance_list)) if self.utterance_list[i][:5] in test_sessions]
+        
+        for idx in tqdm(train_wav_idx, total=len(train_wav_idx)):
+            label_data = np.array((self._gen_labels(self.utterance_list[idx]), self._gen_features(self.utterance_paths[idx])), dtype=object)
+            np.save(os.path.join(train_output_path, self.utterance_list[idx] + '.npy'), label_data)
+        
+        for idx in tqdm(dev_wav_idx, total=len(dev_wav_idx)):
+            label_data = np.array((self._gen_labels(self.utterance_list[idx]), self._gen_features(self.utterance_paths[idx])), dtype=object)
+            np.save(os.path.join(dev_output_path, self.utterance_list[idx] + '.npy'), label_data)
+            
+        for idx in tqdm(test_wav_idx, total=len(test_wav_idx)):
+            label_data = np.array((self._gen_labels(self.utterance_list[idx]), self._gen_features(self.utterance_paths[idx])), dtype=object)
+            np.save(os.path.join(test_output_path, self.utterance_list[idx] + '.npy'), label_data)
         
     
     
     
     
-        
+if __name__ == '__main__':
+    
+    ROOT = 'E:\\Download\\IEMOCAP_full_release_withoutVideos\\IEMOCAP_full_release'
+    OUTPUT_ROOT = 'E:\\Download\\IEMOCAP_full_release_withoutVideos\\data'
+    
+    iemocap = IEMOCAP_Dataset(ROOT, OUTPUT_ROOT, validation='default')
+    iemocap.make_dataset()
