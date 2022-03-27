@@ -66,6 +66,9 @@ class IEMOCAP_Dataset:
                         if line[0] == '[':
                             t = line.split()
                             label_map[t[3]] = t[4]
+        
+        self.LABELS = np.unique(list(label_map.values()))
+        
         return label_map
         
     def _gen_features(self, utter_path, feat_type='logfbank', delta=2):
