@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
 class ACRNN(nn.Module):
     def __init__(self, num_classes=4, is_training=True,
@@ -90,3 +91,107 @@ class ACRNN(nn.Module):
         Ylogits = self.softmax(Ylogits)
 
         return Ylogits
+
+
+class ResidualBlock(nn.Module):
+
+    def __init__(self, in_channels, out_channels, kernel_size, num_feats):
+        super(ResidualBlock, self).__init__()
+        self.norm = nn.LayerNorm(num_feats)
+        self.gelu = nn.GELU()
+        self.dropout = nn.Dropout(0.2)
+        padding = kernel_size // 2
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, padding=padding)
+    
+    def forward(self, X):
+        X = self.norm(X.permute(0, 1, 3, 2)).permute(0, 1, 3, 2)
+        return self.conv(self.dropout(self.gelu(X))) + X
+
+class ACRNN2(nn.Module):
+
+    def __init__(self):
+        super(ACRNN2, self).__init__()
+
+        self.embedding = nn.Sequential(*[
+            nn.Conv2d(in_channels=3,   out_channels=128, kernel_size=(5, 3), padding=(2, 1)),
+            nn.BatchNorm2d(128),
+            nn.Dropout(0.3),
+            nn.GELU(),
+            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=(5, 3), padding=(2, 1)),
+            nn.BatchNorm2d(256),
+            nn.Dropout(0.3),
+            nn.GELU(),
+            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=(5, 3), padding=(2, 1)),
+            nn.BatchNorm2d(256),
+            nn.Dropout(0.3),
+            nn.GELU(),
+            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=(5, 3), padding=(2, 1)),
+            nn.BatchNorm2d(256),
+            nn.Dropout(0.3),
+            nn.GELU(),
+            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=(5, 3), padding=(2, 1)),
+            nn.BatchNorm2d(256),
+            nn.Dropout(0.3),
+            nn.GELU(),
+            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=(5, 3), padding=(2, 1)),
+            nn.BatchNorm2d(256),
+            nn.Dropout(0.3),
+            nn.GELU(),
+        ])
+
+        self.linear = nn.Sequential(*[
+            nn.Linear(10240, 768),
+            nn.LeakyReLU(0.01),
+            nn.Dropout2d(0.3)
+        ])
+
+        self.rnn = nn.LSTM(input_size=768, hidden_size=256, num_layers=4, dropout=0.5, bidirectional=True)
+
+        # self.classifier = nn.Sequential(*[
+        #     nn.Linear(512, 1024),
+        #     nn.GELU(),
+        #     nn.Linear(1024, 11),
+        #     nn.Softmax(dim=2)
+        # ])
+
+        self.a_fc1 = nn.Linear(512, 1)
+        self.a_fc2 = nn.Linear(1, 1)
+        self.a_sigmoid = nn.Sigmoid()
+        
+        self.a_softmax = nn.Softmax(dim=1)
+
+        self.classifier = nn.Sequential(*[
+            nn.Linear(512, 2048),
+            nn.GELU(),
+            nn.Dropout(0.3),
+            nn.Linear(2048, 4),
+            nn.Softmax(dim=1)
+        ])
+
+
+    def forward(self, X):
+
+        X = X.permute((1, 2, 0, 3))
+        out = self.embedding(X)
+        out = out.permute((2, 0, 1, 3))
+
+        out_shape = out.shape
+        out = out.reshape((out_shape[0], out_shape[1], -1))
+        out = self.linear(out)
+
+        # packed_out = pack_padded_sequence(out, X_lengths, enforce_sorted=False)
+        out, (_, _) = self.rnn(out)
+        # out, lengths = pad_packed_sequence(out)
+        # out = out.permute(1, 0, 2).reshape((out.shape[0], -1))
+        # out = self.classifier(out)
+
+        out = out.permute(1, 0, 2)
+        v = self.a_sigmoid(self.a_fc1(out))
+        alphas = self.a_softmax(self.a_fc2(v).squeeze())
+        gru = (alphas.unsqueeze(2) * out).sum(axis=1)
+
+        out = self.classifier(gru)
+
+        # out = torch.stack([out[X_lengths[i] - 1, i, :] for i in range(out.shape[1])])
+
+        return out

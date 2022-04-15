@@ -91,3 +91,111 @@ class acrnn(nn.Module):
         Ylogits = self.softmax(Ylogits)
 
         return Ylogits
+
+class ACRNN(nn.Module):
+
+    def __init__(self, num_classes=4, is_training=True,
+                 L1=128, L2=256, cell_units=128, num_linear=768,
+                 p=10, time_step=150, F1=64, dropout_keep_prob=1):
+        super(ACRNN, self).__init__()
+
+        self.num_classes = num_classes
+        self.is_training = is_training
+        self.L1 = L1
+        self.L2 = L2
+        self.cell_units = cell_units
+        self.num_linear = num_linear
+        self.p = p
+        self.time_step = time_step
+        self.F1 = F1
+        self.dropout_prob = 1 - dropout_keep_prob
+
+        self.embedding = nn.Sequential(*[
+            nn.Conv2d(3, self.L1, (5, 3), padding=(2, 1)),
+            nn.LeakyReLU(0.01),
+            nn.MaxPool2d(kernel_size=(2, 4), stride=(2, 4)),
+            nn.Dropout2d(self.dropout_prob)
+        ])
+
+        self.conv_layers = nn.Sequential(*[
+            nn.Conv2d(self.L1, self.L2, (5, 3), padding=(2, 1)),
+            nn.LeakyReLU(0.01),
+            nn.Dropout2d(self.dropout_prob),
+            nn.Conv2d(self.L2, self.L2, (5, 3), padding=(2, 1)),
+            nn.LeakyReLU(0.01),
+            nn.Dropout2d(self.dropout_prob),
+            nn.Conv2d(self.L2, self.L2, (5, 3), padding=(2, 1)),
+            nn.LeakyReLU(0.01),
+            nn.Dropout2d(self.dropout_prob),
+            nn.Conv2d(self.L2, self.L2, (5, 3), padding=(2, 1)),
+            nn.LeakyReLU(0.01),
+            nn.Dropout2d(self.dropout_prob),
+            nn.Conv2d(self.L2, self.L2, (5, 3), padding=(2, 1)),
+            nn.LeakyReLU(0.01),
+            nn.Dropout2d(self.dropout_prob)
+        ])
+
+        self.linear = nn.Sequential(*[
+            nn.Linear(self.p*self.L2, self.num_linear),
+            nn.BatchNorm1d(self.num_linear),
+            nn.LeakyReLU(0.01)
+        ])
+        
+        self.rnn = nn.LSTM(input_size=self.num_linear, hidden_size=self.cell_units, 
+                            batch_first=True, num_layers=4, bidirectional=True) 
+
+
+        self.attention = nn.Sequential(*[
+            nn.Linear(2 * self.cell_units, 1),
+            nn.Sigmoid(),
+            nn.Linear(1, 1)
+        ])
+
+        self.classifier = nn.Sequential(*[
+            nn.Linear(2 * self.cell_units, self.F1),
+            nn.LeakyReLU(0.01),
+            nn.Dropout2d(p=self.dropout_prob),
+            nn.Linear(self.F1, self.num_classes),
+            nn.Softmax(dim=1)
+        ])
+
+        self._initialize_weights()
+
+    def forward(self, x):
+
+        out = self.embedding(x)
+
+        out = self.conv_layers(out)
+
+        out = out.permute((0, 2, 3, 1))
+        out = out.reshape((-1, self.time_step, self.L2 * self.p))
+        out = out.reshape((-1, self.L2 * self.p))
+
+        out = self.linear(out)
+        out = out.reshape(-1, self.time_step, self.num_linear)
+
+        out, _ = self.rnn(out)
+
+        alphas = F.softmax(self.attention(out).squeeze(), dim=1)
+        out = (alphas.unsqueeze(2) * out).sum(axis=1)
+
+        out = self.classifier(out)
+
+        return out
+    
+    def _initialize_weights(self):
+
+        for name, param in self.rnn.named_parameters():
+            if name.startswith('weight'):
+                nn.init.orthogonal_(param)
+            else:
+                nn.init.zeros_(param)
+            
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                m.weight.data.normal_(0, 0.1)
+                if m.bias is not None:
+                    m.bias.data.fill_(0.1)
+            elif isinstance(m, nn.Linear):
+                m.weight.data.normal_(0, 0.1)
+                m.bias.data.fill_(0.1)

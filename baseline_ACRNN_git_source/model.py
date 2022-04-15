@@ -11,7 +11,7 @@ from __future__ import division
 #from __future__ import print_function
 
 import numpy as np
-from acrnn import acrnn
+from acrnn import acrnn, ACRNN
 import pickle
 from sklearn.metrics import recall_score as recall
 from sklearn.metrics import confusion_matrix as confusion
@@ -25,7 +25,7 @@ num_epoch = 3000
 num_classes = 4
 batch_size = 128
 is_adam = True
-learning_rate = 0.00001
+learning_rate = 0.001
 dropout_keep_prob = 1
 image_height = 300
 image_width = 40
@@ -45,7 +45,12 @@ def load_data(in_dir):
 
 def train():
     #####load data##########
-    train_data, train_label, test_data, test_label, valid_data, valid_label, Valid_label, Test_label, pernums_test, pernums_valid = load_data('./IEMOCAP.pkl')
+    train_data, train_label, test_data, test_label, _, _, _, Test_label, pernums_test, _ = load_data('./data/IEMOCAP.pkl')
+
+    valid_data = np.load('data/IEMOCAP_valid_data.npy', allow_pickle=True)
+    valid_label = np.load('data/IEMOCAP_valid_label.npy', allow_pickle=True)
+    Valid_label = np.load('data/IEMOCAP_Valid_label.npy', allow_pickle=True)
+    pernums_valid = np.load('data/IEMOCAP_pernums_valid.npy', allow_pickle=True)
 
     train_label = train_label.reshape(-1)
     valid_label = valid_label.reshape(-1)
@@ -67,10 +72,12 @@ def train():
             m.weight.data.normal_(0.0, 0.1)
             m.bias.data.fill_(0.1)
 
-    model = acrnn()
-    model.apply(init_weights)
+    model = ACRNN()
+    # model.apply(init_weights)
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), weight_decay=5e-4)
+    # scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=30, threshold=0.05, factor=0.5, min_lr=1e-8)
     criterion = torch.nn.CrossEntropyLoss()
 
     # print(train_data.shape)        # (1200, 300, 40, 3)  # (B, H, W, C)
@@ -79,7 +86,7 @@ def train():
     valid_data = valid_data.transpose((0, 3 ,1 ,2))
     # print(train_data.shape)        # (1200, 3, 300, 40)  # (B, C, H, W)
     
-    num_epoch = 250
+    num_epoch = 3000
     train_iter = divmod(dataset_size, batch_size)[0]
 
     for epoch in range(num_epoch):
@@ -175,7 +182,11 @@ def train():
              print (valid_conf)
              print ('Best Valid Confusion Matrix:["ang","sad","hap","neu"]')
              print (best_valid_conf)
+             print (f"Learning Rate: {optimizer.param_groups[0]['lr']}")
              print ("*****************************************************************" )
+
+        if valid_acc_uw >= 0.3:
+            scheduler.step(valid_acc_uw)
 
                 
 if __name__=='__main__':

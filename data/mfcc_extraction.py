@@ -125,9 +125,6 @@ class IEMOCAP_Dataset:
             np.save(os.path.join(test_output_path, self.utterance_list[idx] + '.npy'), label_data)
         
     
-    
-    
-    
 if __name__ == '__main__':
     
     ROOT = 'E:\\Download\\IEMOCAP_full_release_withoutVideos\\IEMOCAP_full_release'
