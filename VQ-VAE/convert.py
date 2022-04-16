@@ -7,8 +7,10 @@ import torch
 import numpy as np
 import librosa
 from tqdm import tqdm
+import pyloudnorm
 
 from preprocess import preemphasis
+from model import Encoder, Decoder
 
 
 @hydra.main(config_path="config/convert.yaml")
@@ -27,8 +29,8 @@ def convert(cfg):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    encoder = hydra.utils.instantiate(cfg.model.encoder)
-    decoder = hydra.utils.instantiate(cfg.model.decoder)
+    encoder = Encoder(**cfg.model.encoder)
+    decoder = Decoder(**cfg.model.decoder)
     encoder.to(device)
     decoder.to(device)
 
@@ -41,11 +43,22 @@ def convert(cfg):
     encoder.eval()
     decoder.eval()
 
+    meter = pyloudnorm.Meter(cfg.preprocessing.sr)
+
+    session_name = cfg.synthesis_list.split("_")[-1][:-4]
+    mid_address = Path("Session" + session_name[-1] + "/sentences/wav")
+    in_dir = Path(utils.to_absolute_path(cfg.in_dir) / mid_address)
+
     for wav_path, speaker_id, out_filename in tqdm(synthesis_list):
-        wav_path = in_dir / wav_path
+        out_dir_sub = Path(out_dir / mid_address / wav_path[:-5])
+        out_dir_sub.mkdir(parents=True, exist_ok=True)
+
+        wav_path = in_dir / wav_path[:-5] / wav_path
+
         wav, _ = librosa.load(
             wav_path.with_suffix(".wav"),
             sr=cfg.preprocessing.sr)
+        ref_loudness = meter.integrated_loudness(wav)
         wav = wav / np.abs(wav).max() * 0.999
 
         mel = librosa.feature.melspectrogram(
@@ -66,7 +79,9 @@ def convert(cfg):
             z, _ = encoder.encode(mel)
             output = decoder.generate(z, speaker)
 
-        path = out_dir / out_filename
+        output_loudness = meter.integrated_loudness(output)
+        output = pyloudnorm.normalize.loudness(output, output_loudness, ref_loudness)
+        path = out_dir_sub / out_filename
         librosa.output.write_wav(path.with_suffix(".wav"), output.astype(np.float32), sr=cfg.preprocessing.sr)
 
 

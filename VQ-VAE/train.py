@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from dataset import SpeechDataset
+from model import Encoder, Decoder
 
 
 def save_checkpoint(encoder, decoder, optimizer, amp, scheduler, step, checkpoint_dir):
@@ -31,12 +32,12 @@ def save_checkpoint(encoder, decoder, optimizer, amp, scheduler, step, checkpoin
 @hydra.main(config_path="config/train.yaml")
 def train_model(cfg):
     tensorboard_path = Path(utils.to_absolute_path("tensorboard")) / cfg.checkpoint_dir
-    checkpoint_dir = Path(utils.to_absolute_path("checkpoints")) / cfg.checkpoint_dir
+    checkpoint_dir = Path(utils.to_absolute_path(cfg.checkpoint_dir))
     writer = SummaryWriter(tensorboard_path)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    encoder = hydra.utils.instantiate(cfg.model.encoder)
-    decoder = hydra.utils.instantiate(cfg.model.decoder)
+    encoder = Encoder(**cfg.model.encoder)
+    decoder = Decoder(**cfg.model.decoder)
     encoder.to(device)
     decoder.to(device)
 
@@ -94,9 +95,6 @@ def train_model(cfg):
 
             with amp.scale_loss(loss, optimizer) as scaled_loss:
                 scaled_loss.backward()
-
-            torch.nn.utils.clip_grad_norm_(encoder.parameters(), 1)
-            torch.nn.utils.clip_grad_norm_(decoder.parameters(), 1)
 
             torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), 1)
             optimizer.step()
