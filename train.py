@@ -1,230 +1,195 @@
-import time
-import pickle
-import torch
-from tqdm import tqdm
+#!/usr/bin/env python2
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Feb  1 19:05:03 2017
+@author: hxj
+"""
+
+from __future__ import absolute_import
+from __future__ import division
+#from __future__ import print_function
+
 import numpy as np
-import pandas as pd
-from torch.cuda.amp import GradScaler, autocast
-import torch.nn as nn
+from model import ACRNN
+import pickle
+from sklearn.metrics import recall_score as recall
+from sklearn.metrics import confusion_matrix as confusion
+import os
+import torch
 import torch.optim as optim
-import torch.nn.functional as F
-from torchsummaryX import summary
-from torch.utils.data import DataLoader
-from sklearn.metrics import recall_score, confusion_matrix, accuracy_score
-
-from data.emotion_labels import EMOTIONAL_LABELS, EMOTIONAL_LABELS_SHORT
-from model.acrnn import ACRNN, ACRNN2
-from dataset.datasets import IEMOCAPSamples, IEMOCAPSmall
+import pdb
 
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-# print("Device: ", device)
+num_epoch = 3000
+num_classes = 4
+batch_size = 128
+is_adam = True
+learning_rate = 0.001
+dropout_keep_prob = 1
+image_height = 300
+image_width = 40
+image_channel = 3
+# traindata_path = './data/IEMOCAP.pkl'
+# validdata_path = 'inputs/valid.pkl'
+checkpoint = './checkpoint'
+model_name = 'best_model.pth'
+clip = 0
 
-BATCH_SIZE = 64
-LEARNING_RATE = 1e-4
-EPOCHS = 300
-PATH = "data/data"
-NUM_CLASSES = 11
+def load_data(in_dir):
+    f = open(in_dir,'rb')
+    train_data,train_label,test_data,test_label,valid_data,valid_label,Valid_label,Test_label,pernums_test,pernums_valid = pickle.load(f)
+    #train_data,train_label,test_data,test_label,valid_data,valid_label = pickle.load(f)
+    return train_data,train_label,test_data,test_label,valid_data,valid_label,Valid_label,Test_label,pernums_test,pernums_valid
 
 
-def train(model, train_loader, optimizer, criterion, scaler, scheduler, epoch, train_accuracy=None, train_uar=None):
+def train():
+    #####load data##########
+    train_data, train_label, test_data, test_label, _, _, _, Test_label, pernums_test, _ = load_data('./data/IEMOCAP.pkl')
+
+    valid_data = np.load('data/IEMOCAP_valid_data.npy', allow_pickle=True)
+    valid_label = np.load('data/IEMOCAP_valid_label.npy', allow_pickle=True)
+    Valid_label = np.load('data/IEMOCAP_Valid_label.npy', allow_pickle=True)
+    pernums_valid = np.load('data/IEMOCAP_pernums_valid.npy', allow_pickle=True)
+
+    train_label = train_label.reshape(-1)
+    valid_label = valid_label.reshape(-1)
+    Valid_label = Valid_label.reshape(-1)
+
+    valid_size = valid_data.shape[0]
+    dataset_size = train_data.shape[0]
+    vnum = pernums_valid.shape[0]
+    best_valid_uw = 0
+    device = 'cuda'
+
+    ##########tarin model###########
+
+    def init_weights(m):
+        if type(m) == torch.nn.Linear:
+            m.weight.data.normal_(0.0, 0.1)
+            m.bias.data.fill_(0.1)
+        elif type(m) == torch.nn.Conv2d:
+            m.weight.data.normal_(0.0, 0.1)
+            m.bias.data.fill_(0.1)
+
+    model = ACRNN()
+    # model.apply(init_weights)
+    model = model.to(device)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), weight_decay=5e-4)
+    # scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=30, threshold=0.05, factor=0.5, min_lr=1e-8)
+    criterion = torch.nn.CrossEntropyLoss()
+
+    # print(train_data.shape)        # (1200, 300, 40, 3)  # (B, H, W, C)
+    train_data = train_data.transpose((0, 3, 1, 2))
+    test_data = test_data.transpose((0, 3 ,1 ,2))
+    valid_data = valid_data.transpose((0, 3 ,1 ,2))
+    # print(train_data.shape)        # (1200, 3, 300, 40)  # (B, C, H, W)
     
-    model.train()
-    
-    batch_bar = tqdm(total=len(train_loader), dynamic_ncols=True, leave=False)
-    total_loss = 0
-    num_correct = 0
-    y_pred = torch.tensor([]).cuda()
-    y_true = torch.tensor([]).cuda()
-    
-    for batch_idx, (X, y) in enumerate(train_loader):
+    num_epoch = 3000
+    train_iter = divmod(dataset_size, batch_size)[0]
+
+    for epoch in range(num_epoch):
+        # training
+        model.train()
+        shuffle_index = list(range(len(train_data)))
+        np.random.shuffle(shuffle_index)
         
-        X, y = X.float().cuda(), y.long().cuda()
+        for i in range(train_iter):
+            start = (i*batch_size) % dataset_size
+            end = min(start+batch_size, dataset_size)
+
+            if i == (train_iter-1) and end < dataset_size:
+                end = dataset_size
         
-        X = X.permute((1, 0, 3, 2))
-
-        optimizer.zero_grad()
+            inputs = torch.tensor(train_data[shuffle_index[start:end]]).to(device)
+            targets = torch.tensor(train_label[shuffle_index[start:end]], dtype=torch.long).to(device)
+            optimizer.zero_grad()
+            outputs = model(inputs)
         
-        with autocast():
-            output = model(X)
-            loss = criterion(output, y)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            if clip:
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+            optimizer.step()
         
-        y_pred_batch = output.argmax(axis=1)
-        y_pred = torch.concat((y_pred, y_pred_batch))
-        y_true = torch.concat((y_true, y))
+        if epoch % 3 == 0:
+             # validation
+             model.eval()
+             valid_iter = divmod(valid_size, batch_size)[0]
+             y_pred_valid = np.empty((valid_size, num_classes),dtype=np.float32)
+             y_valid = np.empty((vnum, 4), dtype=np.float32)
+             index = 0     
+             cost_valid = 0
+             
+             if (valid_size < batch_size):
 
-        num_correct += int((y_pred_batch == y).sum())
-        total_loss += float(loss)
-        batch_bar.set_postfix(
-            accuracy=f"{float(num_correct / ((batch_idx + 1) * BATCH_SIZE)) * 100:.4f}%",
-            loss=f"{float(total_loss / (batch_idx + 1)):.4f}",
-            lr=f"{float(optimizer.param_groups[0]['lr']):.6f}"
-        )
+                 # inference
+                 with torch.no_grad():
+                     inputs = torch.tensor(valid_data[v_begin:v_end]).to(device)
+                     targets = torch.tensor(Valid_label[v_begin:v_end], dtype=torch.long).to(device)
+                     outputs = model(inputs)
+                     y_pred_valid[v_begin:v_end,:] = outputs.cpu().detach().numpy()
+                     loss = criterion(outputs, targets).cpu().detach().numpy()
 
-        batch_bar.update()
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
-    
-    scheduler.step()
-    train_accuracy.append(accuracy_score(y_true.cpu(), y_pred.cpu()))
-    train_uar.append(recall_score(y_true.cpu(), y_pred.cpu(), average='macro'))
+                 cost_valid = cost_valid + np.sum(loss)
+             
+             for v in range(valid_iter):
+                 v_begin, v_end = v*batch_size, (v+1)*batch_size
 
-    batch_bar.close()
-    print(f"Epoch {epoch}/{EPOCHS}: Train Loss={float(total_loss / len(train_loader)):.04f}, Learning Rate={float(optimizer.param_groups[0]['lr']):.06f}, Accuracy={float(num_correct / ((batch_idx + 1) * BATCH_SIZE)) * 100:.4f}%")
+                 if v == (valid_iter-1) and v_end < valid_size:
+                     v_end = valid_size
 
-def validate(model, val_loader, epoch, val_accuracy=None, val_uar=None):
+                 # inference
+                 with torch.no_grad():
+                     inputs = torch.tensor(valid_data[v_begin:v_end]).to(device)
+                     targets = torch.tensor(Valid_label[v_begin:v_end], dtype=torch.long).to(device)
+                     outputs = model(inputs)
+                     y_pred_valid[v_begin:v_end,:] = outputs.cpu().detach().numpy()
+                     loss = criterion(outputs, targets).cpu().detach().numpy()
+                  
+                 cost_valid = cost_valid + np.sum(loss)
 
-    model.eval()
+             cost_valid = cost_valid/valid_size
 
-    num_correct = 0
-    num_samples = 0
-    batch_bar = tqdm(total=len(val_loader), dynamic_ncols=True, leave=False)
-    y_pred = torch.tensor([]).cuda()
-    y_true = torch.tensor([]).cuda()
+             for s in range(vnum):
+                 y_valid[s,:] = np.max(y_pred_valid[index:index+pernums_valid[s],:], 0)
+                 index = index + pernums_valid[s]
+                 
+             # compute evaluated results
+             valid_acc_uw = recall(valid_label, np.argmax(y_valid, 1), average='macro')
+             valid_conf = confusion(valid_label, np.argmax(y_valid, 1))
 
-    for batch_idx, (X, y) in enumerate(val_loader):
+             # save the best val result
+             if valid_acc_uw > best_valid_uw:
+                 best_valid_uw = valid_acc_uw
+                 best_valid_conf = valid_conf
 
-        X, y = X.float().cuda(), y.long().cuda()
+                 if not os.path.isdir(checkpoint):
+                     os.mkdir(checkpoint)
+                 torch.save(model.state_dict(), os.path.join(checkpoint, model_name))
 
-        X = X.permute((1, 0, 3, 2))
+             # print results
+             print ("*****************************************************************")
+             print ("Epoch: %05d" %(epoch+1))
+             # print ("Training cost: %2.3g" %tcost)   
+             # print ("Training accuracy: %3.4g" %tracc) 
+             print ("Valid cost: %2.3g" %cost_valid)
+             print ("Valid_UA: %3.4g" %valid_acc_uw)    
+             print ("Best valid_UA: %3.4g" %best_valid_uw) 
+             print ('Valid Confusion Matrix:["ang","sad","hap","neu"]')
+             print (valid_conf)
+             print ('Best Valid Confusion Matrix:["ang","sad","hap","neu"]')
+             print (best_valid_conf)
+             print (f"Learning Rate: {optimizer.param_groups[0]['lr']}")
+             print ("*****************************************************************")
 
-        with torch.no_grad():
-            output = model(X)
+        if valid_acc_uw >= 0.3:
+            scheduler.step(valid_acc_uw)
 
-        y_pred_batch = output.argmax(axis=1)
-        y_pred = torch.concat((y_pred, y_pred_batch))
-        y_true = torch.concat((y_true, y))
+def test():
+    pass
 
-        num_samples += len(output)
-        num_correct += int(torch.sum(y == y_pred_batch))
-        running_accuracy = num_correct / num_samples
 
-        batch_bar.set_postfix(
-            accuracy=f"{float(running_accuracy) * 100:.4f}%"
-        )
-
-        batch_bar.update()
-    
-    val_accuracy.append(running_accuracy)
-    unweighted_average_recall = recall_score(y_true.cpu(), y_pred.cpu(), average='macro')
-    val_uar.append(unweighted_average_recall)
-    
-    batch_bar.close()
-    print(f"Validation after Epoch {epoch}/{EPOCHS}: validation accuracy={float(running_accuracy) * 100:.4f}%, UAR={unweighted_average_recall:.4f}")
-
-def test(model, test_loader):
-
-    with open("data/IEMOCAP_val.pkl", "rb") as f:
-        data = pickle.load(f)
-    gender_labels = data[0][428:]
-
-    model.eval()
-
-    num_correct = 0
-    num_samples = 0
-    batch_bar = tqdm(total=len(test_loader), dynamic_ncols=True, leave=False)
-    y_pred = torch.tensor([]).cuda()
-    y_true = torch.tensor([]).cuda()
-
-    for batch_idx, (X, y) in enumerate(test_loader):
-
-        X, y = X.permute((0, 3, 1, 2)).float().cuda(), y.long().cuda()
-
-        with torch.no_grad():
-            output = model(X)
-
-        y_pred_batch = output.argmax(axis=1)
-        y_pred = torch.concat((y_pred, y_pred_batch))
-        y_true = torch.concat((y_true, y))
-
-        num_samples += len(output)
-        num_correct += int(torch.sum(y == y_pred_batch))
-        running_accuracy = num_correct / num_samples
-
-        batch_bar.set_postfix(
-            accuracy=f"{float(running_accuracy) * 100:.4f}%"
-        )
-
-        batch_bar.update()
-    
-    unweighted_average_recall = recall_score(y_true.cpu(), y_pred.cpu(), average='macro')
-
-    y_true = np.array(y_true.cpu())
-    y_pred = np.array(y_pred.cpu())
-
-    pred_df = pd.DataFrame({'gender': gender_labels,
-                            'y_true': y_true,
-                            'y_pred': y_pred})
-    
-    batch_bar.close()
-    print(f"Test Result: Test accuracy={float(running_accuracy) * 100:.4f}%, Test UAR={unweighted_average_recall:.4f}")
-
-    output_name = f"pred_df_{time.strftime('%Y%m%d_%H%M%S', time.localtime())}"
-    pred_df.to_csv(f'results/{output_name}.csv')
-
-def main():
-    
-    batch_size = BATCH_SIZE
-    learning_rate = LEARNING_RATE
-    epochs = EPOCHS
-    path = PATH
-    num_classes = NUM_CLASSES
-    
-    # train_data = IEMOCAPSamples(path, partition='train')
-    # val_data = IEMOCAPSamples(path, partition='dev', shuffle=False)
-    # test_data = IEMOCAPSamples(path, partition='test', shuffle=False)
-
-    train_data = IEMOCAPSmall(partition='train')
-    val_data = IEMOCAPSmall(pickle_path="data/IEMOCAP_val.pkl", partition="dev")
-    test_data = IEMOCAPSmall(pickle_path="data/IEMOCAP_val.pkl", partition="test")
-    
-    # train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, collate_fn=train_data.collate_fn,
-    #                           num_workers=8, pin_memory=True)
-    # val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, collate_fn=val_data.collate_fn,
-    #                         num_workers=8, pin_memory=True)
-    # test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False,collate_fn=test_data.collate_fn,
-    #                          num_workers=8, pin_memory=True)
-
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True,
-                              num_workers=16, pin_memory=True)
-    val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False,
-                            num_workers=16, pin_memory=True)
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False,
-                             num_workers=16, pin_memory=True)
-    
-    model = ACRNN2()
-    model = model.cuda()
-    
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), weight_decay=5e-4)
-    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
-    scaler = GradScaler()
-    
-    train_accuracy = []
-    train_uar = []
-    validation_accuracy = []
-    validation_uar = []
-
-    # train_loader = list(train_loader)
-
-    for epoch in range(1, epochs + 1):
-        
-        train(model, train_loader, optimizer, criterion, scaler, scheduler, epoch, train_accuracy, train_uar)
-        validate(model, val_loader, epoch, validation_accuracy, validation_uar)
-
-    # test(model, test_loader)
-
-    # training_log_df = pd.DataFrame({'epoch': list(range(EPOCHS)),
-    #                                 'train_accuracy': train_accuracy,
-    #                                 'val_accuracy': validation_accuracy,
-    #                                 'train_uar': train_uar,
-    #                                 'val_uar': validation_uar})
-    
-    # training_log_name = f"log_{time.strftime('%Y%m%d_%H%M%S', time.localtime())}"
-    # training_log_df.to_csv(f"log/{training_log_name}.csv")
-
-if __name__ == "__main__":
-    
-    main()
-
+if __name__=='__main__':
+    train()

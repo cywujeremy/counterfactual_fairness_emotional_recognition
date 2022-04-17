@@ -1,3 +1,6 @@
 *.pyc
 data/IEMOCAP.pkl
 data/data
+*.pth
+*.pkl
+*.npy
