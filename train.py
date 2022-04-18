@@ -8,8 +8,10 @@ from __future__ import division
 #from __future__ import print_function
 
 import numpy as np
+import time
 from model import ACRNN
 import pickle
+from sklearn.metrics import accuracy_score
 from sklearn.metrics import recall_score as recall
 from sklearn.metrics import confusion_matrix as confusion
 import os
@@ -20,6 +22,7 @@ from tqdm import tqdm
 
 from torch.utils.data import DataLoader
 from datasets import IEMOCAPTrain, IEMOCAPValid
+from utils.training_tracker import TrainingTracker
 
 
 num_epoch = 3000
@@ -32,31 +35,26 @@ image_height = 300
 image_width = 40
 image_channel = 3
 
-checkpoint = './checkpoint'
-model_name = 'best_model.pth'
+start_time = time.strftime('%Y%m%d_%H%M%S', time.localtime())
+checkpoint = f'./checkpoint/{start_time}'
+experiment_name = "acrnn_ar0.2_ld0.4"
+
 clip = 0
 ar_alpha = 0.2
 
-def load_data(in_dir):
-    f = open(in_dir,'rb')
-    train_data,train_label,test_data,test_label,valid_data,valid_label,Valid_label,Test_label,pernums_test,pernums_valid = pickle.load(f)
-    #train_data,train_label,test_data,test_label,valid_data,valid_label = pickle.load(f)
-    return train_data,train_label,test_data,test_label,valid_data,valid_label,Valid_label,Test_label,pernums_test,pernums_valid
-
 def train():
-    #####load data##########
     best_valid_uw = 0
     device = 'cuda'
+
+    tracker = TrainingTracker(experiment_name)
 
     train_dataset = IEMOCAPTrain()
     valid_dataset = IEMOCAPValid()
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
     valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
     vnum = valid_dataset.pernums_valid.shape[0]
-    ##########tarin model###########
 
     model = ACRNN()
-    # model.apply(init_weights)
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), weight_decay=5e-4)
     # scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
@@ -64,16 +62,22 @@ def train():
     criterion = torch.nn.CrossEntropyLoss()
 
     for epoch in range(num_epoch):
-        # training
         model.train()
         running_loss = 0
         batch_bar = tqdm(total=(len(train_loader)), dynamic_ncols=True, leave=False)
+
+        y_pred = torch.tensor([])
+        y_true = torch.tensor([])
+
         for i, (inputs, targets) in enumerate(train_loader):
             
             inputs, targets = inputs.float().cuda(), targets.long().cuda()
-
             optimizer.zero_grad()
             outputs, rnn_hs = model(inputs)
+
+            y_true = torch.cat((y_true, targets.cpu()))
+            y_pred = torch.cat((y_pred, outputs.argmax(dim=1).cpu()))
+
             loss = criterion(outputs, targets) + sum(ar_alpha * rnn_h.pow(2).mean() for rnn_h in rnn_hs[-1:])
             loss.backward()
             running_loss += float(loss)
@@ -89,13 +93,17 @@ def train():
             )
             batch_bar.update()
 
+        tracker.training_loss.append(running_loss / (i + 1))
+        tracker.training_accuracy.append(accuracy_score(y_true, y_pred))
+        tracker.training_uar.append(recall(y_true, y_pred, average='macro'))
+
         batch_bar.close()
         print(f"Epoch {epoch}/{num_epoch}: loss={running_loss / (i + 1):.4f}")
         
         if epoch % 1 == 0:
             # validation
             model.eval()
-            y_pred_valid = np.empty((0, num_classes),dtype=np.float32)
+            y_pred_valid = np.empty((0, num_classes), dtype=np.float32)
             y_valid = np.empty((vnum, 4), dtype=np.float32)
             index = 0     
             cost_valid = 0
@@ -108,23 +116,31 @@ def train():
                     loss = criterion(outputs, targets).cpu().detach().numpy()
                 cost_valid = cost_valid + np.sum(loss)
 
-            cost_valid = cost_valid / len(valid_dataset)
+            cost_valid = cost_valid / len(valid_loader)
 
             for s in range(vnum):
                 y_valid[s,:] = np.max(y_pred_valid[index:index + valid_dataset.pernums_valid[s],:], 0)
                 index = index + valid_dataset.pernums_valid[s]
                  
-             # compute evaluated results
+            # compute evaluated results
+            valid_accuracy = accuracy_score(valid_dataset.valid_label, np.argmax(y_valid, 1))
             valid_acc_uw = recall(valid_dataset.valid_label, np.argmax(y_valid, 1), average='macro')
             valid_conf = confusion(valid_dataset.valid_label, np.argmax(y_valid, 1))
+            tracker.validation_accuracy.append(valid_accuracy)
+            tracker.validation_uar.append(valid_acc_uw)
+            tracker.validation_confusion_matrix.append(valid_conf)
+            tracker.validation_loss.append(cost_valid)
 
              # save the best val result
             if valid_acc_uw > best_valid_uw:
                 best_valid_uw = valid_acc_uw
                 best_valid_conf = valid_conf
+                tracker.best_epoch = epoch
 
                 if not os.path.isdir(checkpoint):
                     os.mkdir(checkpoint)
+
+                model_name = f"model_{experiment_name}_{best_valid_uw:.4f}.pth"
                 torch.save(model.state_dict(), os.path.join(checkpoint, model_name))
 
             # print results
@@ -144,6 +160,10 @@ def train():
 
         if valid_acc_uw >= 0.3 and epoch >= 20:
             scheduler.step(valid_acc_uw)
+        
+        log_name = f"log/log_{start_time}_{experiment_name}.pkl"
+        with open(log_name, 'wb') as f:
+            pickle.dump(tracker, f)
 
 def test():
     pass
