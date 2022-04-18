@@ -18,7 +18,6 @@ import os
 import torch
 import torch.optim as optim
 import pdb
-from tqdm import tqdm
 
 
 num_epoch = 3000
@@ -35,7 +34,6 @@ image_channel = 3
 checkpoint = './checkpoint'
 model_name = 'best_model.pth'
 clip = 0
-ar_alpha = 0.2
 
 def load_data(in_dir):
     f = open(in_dir,'rb')
@@ -65,12 +63,20 @@ def train():
 
     ##########tarin model###########
 
+    def init_weights(m):
+        if type(m) == torch.nn.Linear:
+            m.weight.data.normal_(0.0, 0.1)
+            m.bias.data.fill_(0.1)
+        elif type(m) == torch.nn.Conv2d:
+            m.weight.data.normal_(0.0, 0.1)
+            m.bias.data.fill_(0.1)
+
     model = ACRNN()
     # model.apply(init_weights)
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), weight_decay=5e-4)
     # scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=15, threshold=0.02, factor=0.5, min_lr=1e-8)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=30, threshold=0.05, factor=0.5, min_lr=1e-8)
     criterion = torch.nn.CrossEntropyLoss()
 
     # print(train_data.shape)        # (1200, 300, 40, 3)  # (B, H, W, C)
@@ -87,8 +93,7 @@ def train():
         model.train()
         shuffle_index = list(range(len(train_data)))
         np.random.shuffle(shuffle_index)
-        running_loss = 0
-        batch_bar = tqdm(total=train_iter, dynamic_ncols=True, leave=False)
+        
         for i in range(train_iter):
             start = (i*batch_size) % dataset_size
             end = min(start+batch_size, dataset_size)
@@ -99,24 +104,16 @@ def train():
             inputs = torch.tensor(train_data[shuffle_index[start:end]]).to(device)
             targets = torch.tensor(train_label[shuffle_index[start:end]], dtype=torch.long).to(device)
             optimizer.zero_grad()
-            outputs, rnn_hs = model(inputs)
-            loss = criterion(outputs, targets) + sum(ar_alpha * rnn_h.pow(2).mean() for rnn_h in rnn_hs[-1:])
+            outputs = model(inputs)
+        
+            loss = criterion(outputs, targets)
             loss.backward()
-            running_loss += float(loss)
             if clip:
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
             optimizer.step()
-
-            batch_bar.set_postfix(
-                loss=f"{float(running_loss / (i + 1)):.4f}",
-                lr=f"{float(optimizer.param_groups[0]['lr']):.6f}"
-            )
-            batch_bar.update()
-        batch_bar.close()
-        print(f"Epoch {epoch}/{num_epoch}: loss={running_loss / (i + 1):.4f}")
         
-        if epoch % 1 == 0:
+        if epoch % 3 == 0:
              # validation
              model.eval()
              valid_iter = divmod(valid_size, batch_size)[0]
@@ -131,7 +128,7 @@ def train():
                  with torch.no_grad():
                      inputs = torch.tensor(valid_data[v_begin:v_end]).to(device)
                      targets = torch.tensor(Valid_label[v_begin:v_end], dtype=torch.long).to(device)
-                     outputs, _ = model(inputs)
+                     outputs = model(inputs)
                      y_pred_valid[v_begin:v_end,:] = outputs.cpu().detach().numpy()
                      loss = criterion(outputs, targets).cpu().detach().numpy()
 
@@ -147,7 +144,7 @@ def train():
                  with torch.no_grad():
                      inputs = torch.tensor(valid_data[v_begin:v_end]).to(device)
                      targets = torch.tensor(Valid_label[v_begin:v_end], dtype=torch.long).to(device)
-                     outputs, _ = model(inputs)
+                     outputs = model(inputs)
                      y_pred_valid[v_begin:v_end,:] = outputs.cpu().detach().numpy()
                      loss = criterion(outputs, targets).cpu().detach().numpy()
                   
@@ -187,7 +184,7 @@ def train():
              print (f"Learning Rate: {optimizer.param_groups[0]['lr']}")
              print ("*****************************************************************")
 
-        if valid_acc_uw >= 0.3 and epoch >= 20:
+        if valid_acc_uw >= 0.3:
             scheduler.step(valid_acc_uw)
 
 def test():
