@@ -260,7 +260,7 @@ class ACRNN(nn.Module):
 
     def __init__(self, num_classes=4, is_training=True,
                  L1=128, L2=256, cell_units=128, num_linear=768,
-                 p=10, time_step=150, F1=64, dropout_keep_prob=0.95):
+                 p=10, time_step=150, F1=64, dropout_keep_prob=1):
         super(ACRNN, self).__init__()
 
         self.num_classes = num_classes
@@ -305,7 +305,7 @@ class ACRNN(nn.Module):
             nn.LeakyReLU(0.01)
         ])
         
-        self.locked_dropout = LockedDropout(0.4)
+        self.locked_dropout = LockedDropout(0.5)
         self.rnn1 = nn.LSTM(input_size=self.num_linear, hidden_size=self.cell_units, 
                             batch_first=True, num_layers=1, bidirectional=True)
 

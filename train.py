@@ -25,24 +25,22 @@ from datasets import IEMOCAPTrain, IEMOCAPValid
 from utils.training_tracker import TrainingTracker
 
 
-num_epoch = 3000
-num_classes = 4
-batch_size = 128
-is_adam = True
-learning_rate = 0.001
-dropout_keep_prob = 1
-image_height = 300
-image_width = 40
-image_channel = 3
 
-start_time = time.strftime('%Y%m%d_%H%M%S', time.localtime())
-checkpoint = f'./checkpoint/{start_time}'
-experiment_name = "acrnn_ar0.2_ld0.4"
-
-clip = 0
-ar_alpha = 0.2
 
 def train():
+
+    num_epoch = 300
+    num_classes = 4
+    batch_size = 128
+    learning_rate = 0.001
+
+    start_time = time.strftime('%Y%m%d_%H%M%S', time.localtime())
+    checkpoint = f'./checkpoint/{start_time}'
+    experiment_name = "acrnn_locked_dropout_act_reg0.3"
+
+    clip = 0
+    ar_alpha = 0.3
+
     best_valid_uw = 0
     device = 'cuda'
 
@@ -58,7 +56,7 @@ def train():
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), weight_decay=5e-4)
     # scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=15, threshold=0.02, factor=0.5, min_lr=1e-8)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=15, threshold=0.02, factor=0.8, min_lr=1e-8)
     criterion = torch.nn.CrossEntropyLoss()
 
     for epoch in range(num_epoch):
@@ -98,7 +96,7 @@ def train():
         tracker.training_uar.append(recall(y_true, y_pred, average='macro'))
 
         batch_bar.close()
-        print(f"Epoch {epoch}/{num_epoch}: loss={running_loss / (i + 1):.4f}")
+        print(f"Epoch {epoch + 1}/{num_epoch}: loss={running_loss / (i + 1):.4f}")
         
         if epoch % 1 == 0:
             # validation
@@ -145,7 +143,7 @@ def train():
 
             # print results
             print ("*****************************************************************")
-            print ("Epoch: %05d" %(epoch+1))
+            print ("Epoch: %05d" %(epoch + 1))
             # print ("Training cost: %2.3g" %tcost)   
             # print ("Training accuracy: %3.4g" %tracc) 
             print ("Valid cost: %2.3g" %cost_valid)
