@@ -4,4 +4,6 @@ data/data
 *.pth
 *.pkl
 *.npy
-checkpoint/
+
+# Include one of the model pickle as an example
+!checkpoint/20220424_100531/model_acrnn_locked_dropout_act_reg0.3_0.5406.pth
