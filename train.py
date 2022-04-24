@@ -1,11 +1,10 @@
 """
-This training pipeline is adapted from the codes of the original paper.
+This training pipeline is adapted and reconstructed from the codes of the original paper.
 Reference link: https://github.com/Chien-Hung/Speech-Emotion-Recognition
 """
 
 from __future__ import absolute_import
 from __future__ import division
-#from __future__ import print_function
 
 import numpy as np
 import time
@@ -21,37 +20,34 @@ import pdb
 from tqdm import tqdm
 
 from torch.utils.data import DataLoader
-from datasets import IEMOCAPTrain, IEMOCAPValid
+from datasets import IEMOCAPTrain, IEMOCAPEval
 from utils.training_tracker import TrainingTracker
+from utils.fairness_eval import FairnessEvaluation
 
+num_epoch = 300
+num_classes = 4
+batch_size = 128
+learning_rate = 0.001
 
+start_time = time.strftime('%Y%m%d_%H%M%S', time.localtime())
+checkpoint = f'./checkpoint/{start_time}'
+experiment_name = "acrnn_locked_dropout_act_reg0.3"
 
+clip = 0
+ar_alpha = 0.3
+device = 'cuda'
 
 def train():
 
-    num_epoch = 300
-    num_classes = 4
-    batch_size = 128
-    learning_rate = 0.001
-
-    start_time = time.strftime('%Y%m%d_%H%M%S', time.localtime())
-    checkpoint = f'./checkpoint/{start_time}'
-    experiment_name = "acrnn_locked_dropout_act_reg0.3"
-
-    clip = 0
-    ar_alpha = 0.3
-
     best_valid_uw = 0
-    device = 'cuda'
 
     tracker = TrainingTracker(experiment_name)
-
     train_dataset = IEMOCAPTrain()
-    valid_dataset = IEMOCAPValid()
+    valid_dataset = IEMOCAPEval(partition='val')
+    
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
     valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
-    vnum = valid_dataset.pernums_valid.shape[0]
-
+    
     model = ACRNN()
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), weight_decay=5e-4)
@@ -102,8 +98,6 @@ def train():
             # validation
             model.eval()
             y_pred_valid = np.empty((0, num_classes), dtype=np.float32)
-            y_valid = np.empty((vnum, 4), dtype=np.float32)
-            index = 0     
             cost_valid = 0
              
             for i, (inputs, targets) in enumerate(valid_loader):
@@ -115,15 +109,11 @@ def train():
                 cost_valid = cost_valid + np.sum(loss)
 
             cost_valid = cost_valid / len(valid_loader)
-
-            for s in range(vnum):
-                y_valid[s,:] = np.max(y_pred_valid[index:index + valid_dataset.pernums_valid[s],:], 0)
-                index = index + valid_dataset.pernums_valid[s]
                  
             # compute evaluated results
-            valid_accuracy = accuracy_score(valid_dataset.valid_label, np.argmax(y_valid, 1))
-            valid_acc_uw = recall(valid_dataset.valid_label, np.argmax(y_valid, 1), average='macro')
-            valid_conf = confusion(valid_dataset.valid_label, np.argmax(y_valid, 1))
+            valid_accuracy = accuracy_score(valid_dataset.label, np.argmax(y_pred_valid, 1))
+            valid_acc_uw = recall(valid_dataset.label, np.argmax(y_pred_valid, 1), average='macro')
+            valid_conf = confusion(valid_dataset.label, np.argmax(y_pred_valid, 1))
             tracker.validation_accuracy.append(valid_accuracy)
             tracker.validation_uar.append(valid_acc_uw)
             tracker.validation_confusion_matrix.append(valid_conf)
@@ -139,22 +129,20 @@ def train():
                     os.mkdir(checkpoint)
 
                 model_name = f"model_{experiment_name}_{best_valid_uw:.4f}.pth"
-                torch.save(model.state_dict(), os.path.join(checkpoint, model_name))
+                torch.save(model, os.path.join(checkpoint, model_name))
 
             # print results
-            print ("*****************************************************************")
-            print ("Epoch: %05d" %(epoch + 1))
-            # print ("Training cost: %2.3g" %tcost)   
-            # print ("Training accuracy: %3.4g" %tracc) 
-            print ("Valid cost: %2.3g" %cost_valid)
-            print ("Valid_UA: %3.4g" %valid_acc_uw)    
-            print ("Best valid_UA: %3.4g" %best_valid_uw) 
-            print ('Valid Confusion Matrix:["ang","sad","hap","neu"]')
-            print (valid_conf)
-            print ('Best Valid Confusion Matrix:["ang","sad","hap","neu"]')
-            print (best_valid_conf)
-            print (f"Learning Rate: {optimizer.param_groups[0]['lr']}")
-            print ("*****************************************************************")
+            print("*****************************************************************")
+            print("Epoch: %05d" %(epoch + 1))
+            print("Valid cost: %2.3g" %cost_valid)
+            print("Valid_UAR: %3.4g" %valid_acc_uw)    
+            print("Best valid_UA: %3.4g" %best_valid_uw) 
+            print('Valid Confusion Matrix:["ang","sad","hap","neu"]')
+            print(valid_conf)
+            print('Best Valid Confusion Matrix:["ang","sad","hap","neu"]')
+            print(best_valid_conf)
+            print(f"Learning Rate: {optimizer.param_groups[0]['lr']}")
+            print("*****************************************************************")
 
         if valid_acc_uw >= 0.3 and epoch >= 20:
             scheduler.step(valid_acc_uw)
@@ -163,9 +151,45 @@ def train():
         with open(log_name, 'wb') as f:
             pickle.dump(tracker, f)
 
-def test():
-    pass
 
+def test(model, test_loader, test_dataset, criterion, return_fairness_eval=False):
+    # test
+    model.eval()
+    y_pred_test = np.empty((0, num_classes), dtype=np.float32)
+    cost_test = 0
+        
+    for i, (inputs, targets) in enumerate(test_loader):
+        with torch.no_grad():
+            inputs, targets = inputs.float().cuda(), targets.long().cuda()
+            outputs, _ = model(inputs)
+            y_pred_test = np.vstack((y_pred_test, outputs.detach().cpu().numpy()))
+            loss = criterion(outputs, targets).cpu().detach().numpy()
+        cost_test = cost_test + np.sum(loss)
+
+    cost_test = cost_test / len(test_loader)
+            
+    # compute performance evaluation scores
+    test_accuracy = accuracy_score(test_dataset.label, np.argmax(y_pred_test, 1))
+    test_acc_uw = recall(test_dataset.label, np.argmax(y_pred_test, 1), average='macro')
+    test_conf = confusion(test_dataset.label, np.argmax(y_pred_test, 1))
+
+    # compute fairness evaluation scores
+    fairness_eval = FairnessEvaluation(test_dataset.gender, test_dataset.label, np.argmax(y_pred_test, 1))
+
+    # print results
+    print("*****************************************************************")
+    print(f"Evaluation on Test Set:")
+    print("Test cost: %2.3g" %cost_test)
+    print("Test accuracy: %2.3g" %test_accuracy)
+    print("Test UAR: %3.4g" %test_acc_uw)
+    print('Test Confusion Matrix:["ang","sad","hap","neu"]')
+    print(test_conf)
+    print('Fairness Scores (in terms of equal opportunities):')
+    fairness_eval.print_equal_opportunities()
+    print("*****************************************************************")
+
+    if return_fairness_eval:
+        return fairness_eval
 
 if __name__=='__main__':
     train()
