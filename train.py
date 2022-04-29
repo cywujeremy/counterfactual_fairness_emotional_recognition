@@ -31,7 +31,9 @@ learning_rate = 0.001
 
 start_time = time.strftime('%Y%m%d_%H%M%S', time.localtime())
 checkpoint = f'./checkpoint/{start_time}'
-experiment_name = "acrnn_locked_dropout_act_reg0.3"
+#experiment_name = "acrnn_locked_dropout_act_reg0.3"
+
+experiment_name = "fairness_dataaug_100_100"
 
 clip = 0
 ar_alpha = 0.3
@@ -43,9 +45,13 @@ def train():
 
     tracker = TrainingTracker(experiment_name)
     train_dataset = IEMOCAPTrain()
+    train_counter_dataset = IEMOCAPTrain(converted=True)
     valid_dataset = IEMOCAPEval(partition='val')
-    
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+
+    train_full_sets = torch.utils.data.ConcatDataset([train_dataset, train_counter_dataset])
+
+
+    train_loader = DataLoader(train_full_sets, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
     valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
     
     model = ACRNN()
