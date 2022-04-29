@@ -20,7 +20,7 @@ import pdb
 from tqdm import tqdm
 
 from torch.utils.data import DataLoader
-from datasets import IEMOCAPTrain, IEMOCAPEval
+from datasets import IEMOCAPTrain, IEMOCAPTrainAUG, IEMOCAPEval
 from utils.training_tracker import TrainingTracker
 from utils.fairness_eval import FairnessEvaluation
 
@@ -33,27 +33,31 @@ start_time = time.strftime('%Y%m%d_%H%M%S', time.localtime())
 checkpoint = f'./checkpoint/{start_time}'
 #experiment_name = "acrnn_locked_dropout_act_reg0.3"
 
-experiment_name = "fairness_dataaug_100_100"
+experiment_name = "fairness_dataaug_50_50"
 
 clip = 0
 ar_alpha = 0.3
 device = 'cuda'
 
-def train():
+aug = True
+ratio = 0.5
+
+def train(aug, ratio):
 
     best_valid_uw = 0
 
     tracker = TrainingTracker(experiment_name)
-    train_dataset = IEMOCAPTrain()
-    train_counter_dataset = IEMOCAPTrain(converted=True)
+
+    if aug:
+        train_dataset = IEMOCAPTrainAUG(ratio=ratio)
+    else:
+        train_dataset = IEMOCAPTrain()
     valid_dataset = IEMOCAPEval(partition='val')
 
-    train_full_sets = torch.utils.data.ConcatDataset([train_dataset, train_counter_dataset])
-
-
-    train_loader = DataLoader(train_full_sets, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
     valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
     
+    print('DATASET:', len(train_loader))
     model = ACRNN()
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), weight_decay=5e-4)
@@ -198,4 +202,4 @@ def test(model, test_loader, test_dataset, criterion, return_fairness_eval=False
         return fairness_eval
 
 if __name__=='__main__':
-    train()
+    train(aug, ratio)

@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 import pickle
+import random
 
 def load_data(in_dir):
     with open(in_dir, 'rb') as f:
@@ -16,13 +17,32 @@ class IEMOCAPTrain(Dataset):
         data = load_data(path)
         self.train_data, self.train_label = data[0].transpose((0, 3, 1, 2)), data[1]
         self.train_label = self.train_label.reshape(-1)
-    
+
     def __getitem__(self, index):
         return torch.tensor(self.train_data[index]), torch.tensor(self.train_label[index])
 
     def __len__(self):
         return len(self.train_data)
         
+class IEMOCAPTrainAUG(Dataset):
+
+    def __init__(self, root='data', ratio=1.0):
+        super(IEMOCAPTrainAUG, self).__init__()
+        orgdata = load_data(root + '/IEMOCAP_train.pkl')
+        counterdata = load_data(root + '/IEMOCAP_train_converted.pkl')
+
+        # select the subset of dataset based on a ratio
+        randnum = random.sample(range(0, orgdata[0].shape[0]), int(orgdata[0].shape[0]*ratio))
+        self.train_data = np.concatenate([orgdata[0][randnum], counterdata[0][randnum]]).transpose((0, 3, 1, 2))
+        self.train_label = np.concatenate([orgdata[1][randnum], counterdata[1][randnum]])
+        self.train_label = self.train_label.reshape(-1)
+    
+    def __getitem__(self, index):
+        return torch.tensor(self.train_data[index]), torch.tensor(self.train_label[index])
+
+    def __len__(self):
+        return len(self.train_data)
+
 
 class IEMOCAPEval(Dataset):
 
