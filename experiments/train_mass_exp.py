@@ -8,8 +8,9 @@ from __future__ import division
 from IPython.display import clear_output
 
 import numpy as np
+from copy import deepcopy
 import time
-from model import ACRNN
+from model import ACRNN, ACRNN_LockedDropout_WGTInit, ACRNNBaselineStable
 import pickle
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import recall_score as recall
@@ -38,9 +39,10 @@ clip = 0
 ar_alpha = 0.3
 device = 'cuda'
 
-def train(model, experiment_name, num_epoch, verbose=True, save_model=True):
+def train(model, experiment_name, num_epoch, verbose=True, save_model=True, return_best_model=False):
 
     best_valid_uw = 0
+    best_model = None
 
     tracker = TrainingTracker(experiment_name)
     train_dataset = IEMOCAPTrain()
@@ -72,8 +74,8 @@ def train(model, experiment_name, num_epoch, verbose=True, save_model=True):
             y_true = torch.cat((y_true, targets.cpu()))
             y_pred = torch.cat((y_pred, outputs.argmax(dim=1).cpu()))
 
-            # loss = criterion(outputs, targets) + sum(ar_alpha * rnn_h.pow(2).mean() for rnn_h in rnn_hs[-1:])
-            loss = criterion(outputs, targets)
+            loss = criterion(outputs, targets) + sum(ar_alpha * rnn_h.pow(2).mean() for rnn_h in rnn_hs[-1:])
+            # loss = criterion(outputs, targets)
 
             loss.backward()
             running_loss += float(loss)
@@ -127,6 +129,7 @@ def train(model, experiment_name, num_epoch, verbose=True, save_model=True):
                 best_valid_uw = valid_acc_uw
                 best_valid_conf = valid_conf
                 tracker.best_epoch = epoch
+                best_model = deepcopy(model)
 
                 if not os.path.isdir(checkpoint):
                     os.mkdir(checkpoint)
@@ -154,6 +157,9 @@ def train(model, experiment_name, num_epoch, verbose=True, save_model=True):
         log_name = f"log/log_{start_time}_{experiment_name}.pkl"
         with open(log_name, 'wb') as f:
             pickle.dump(tracker, f)
+    
+    if return_best_model:
+        return best_model
 
 
 def test(model, test_loader, test_dataset, criterion, return_fairness_eval=False):
@@ -196,6 +202,17 @@ def test(model, test_loader, test_dataset, criterion, return_fairness_eval=False
         return fairness_eval
 
 if __name__=='__main__':
-    model = ACRNN()
-    # train(model, experiment_name, num_epoch)
-    train(model, f"locked_dropout_activation_reg_vanilla", num_epoch=200, verbose=True, save_model=True)
+    # model = ACRNN()
+    # for i in range(30):
+    #     train(model, f"locked_dropout_activation_reg_{i + 1}", 100, verbose=True, save_model=False)
+
+    for i in range(30):
+        model = ACRNN()
+        model = train(model, f"locked_dropout_activation_reg_exp{i}", num_epoch=100, verbose=True, save_model=False, return_best_model=True)
+        test_dataset = IEMOCAPEval(partition='test')
+        test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False, num_workers=1, pin_memory=True)
+        criterion = torch.nn.CrossEntropyLoss()
+
+        fairness_eval = test(model, test_loader, test_dataset, criterion, return_fairness_eval=True)
+        with open(f'log/fairness_experiments/fairness_eval_twin_exp{i}.pkl', 'wb') as f:
+            pickle.dump(fairness_eval, f)

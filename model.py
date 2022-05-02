@@ -9,7 +9,7 @@ class ACRNNBaselineStable(nn.Module):
     def __init__(self, num_classes=4, is_training=True,
                  L1=128, L2=256, cell_units=128, num_linear=768,
                  p=10, time_step=150, F1=64, dropout_keep_prob=1):
-        super(ACRNN, self).__init__()
+        super(ACRNNBaselineStable, self).__init__()
 
         self.num_classes = num_classes
         self.is_training = is_training
@@ -86,14 +86,14 @@ class ACRNNBaselineStable(nn.Module):
         out = self.linear(out)
         out = out.reshape(-1, self.time_step, self.num_linear)
 
-        out, _ = self.rnn(out)
+        out, hiddens = self.rnn(out)
 
         alphas = F.softmax(self.attention(out).squeeze(), dim=1)
         out = (alphas.unsqueeze(2) * out).sum(axis=1)
 
         out = self.classifier(out)
 
-        return out
+        return out, hiddens
     
     def _initialize_weights(self):
 
@@ -118,7 +118,7 @@ class ACRNN_LockedDropout_WGTInit(nn.Module):
     def __init__(self, num_classes=4, is_training=True,
                  L1=128, L2=256, cell_units=128, num_linear=768,
                  p=10, time_step=150, F1=64, dropout_keep_prob=1):
-        super(ACRNN, self).__init__()
+        super(ACRNN_LockedDropout_WGTInit, self).__init__()
 
         self.num_classes = num_classes
         self.is_training = is_training
@@ -219,7 +219,7 @@ class ACRNN_LockedDropout_WGTInit(nn.Module):
 
         out = self.classifier(out)
 
-        return out
+        return out, None
     
     def _initialize_weights(self):
 

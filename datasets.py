@@ -22,7 +22,28 @@ class IEMOCAPTrain(Dataset):
 
     def __len__(self):
         return len(self.train_data)
-        
+
+class IEMOCAPTrainTwin(Dataset):
+
+    def __init__(self, root='data'):
+        super(IEMOCAPTrainTwin, self).__init__()
+        path_original = root + '/IEMOCAP_train.pkl' 
+        path_converted = root + '/IEMOCAP_train_converted.pkl'
+
+        data_original = load_data(path_original)
+        self.train_data_original, self.train_label_original = data_original[0].transpose((0, 3, 1, 2)), data_original[1]
+        self.train_label_original = self.train_label_original.reshape(-1)
+
+        data_converted = load_data(path_converted)
+        self.train_data_converted, self.train_label_converted = data_converted[0].transpose((0, 3, 1, 2)), data_converted[1]
+        self.train_label_converted = self.train_label_converted.reshape(-1)
+    
+    def __getitem__(self, index):
+        return torch.tensor(self.train_data_original[index]), torch.tensor(self.train_label_original[index]), \
+               torch.tensor(self.train_data_converted[index]), torch.tensor(self.train_label_converted[index])
+
+    def __len__(self):
+        return len(self.train_data_original)
 
 class IEMOCAPEval(Dataset):
 
