@@ -33,7 +33,7 @@ start_time = time.strftime('%Y%m%d_%H%M%S', time.localtime())
 checkpoint = f'./checkpoint/{start_time}'
 #experiment_name = "acrnn_locked_dropout_act_reg0.3"
 
-experiment_name = "fairness_dataaug_50_50"
+#experiment_name = "fairness_dataaug_50_50"
 
 clip = 0
 ar_alpha = 0.3
@@ -202,4 +202,9 @@ def test(model, test_loader, test_dataset, criterion, return_fairness_eval=False
         return fairness_eval
 
 if __name__=='__main__':
-    train(aug, ratio)
+    ratio_lst = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    for r in ratio_lst:
+        for i in range(5):
+            experiment_name = "fairness_dataaug_ratio{}_trial{}".format(r, i)
+
+            train(aug, ratio)
