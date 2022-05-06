@@ -185,7 +185,7 @@ def test(model, test_loader, test_dataset, criterion, return_fairness_eval=False
 
     # compute fairness evaluation scores
     fairness_eval = FairnessEvaluation(test_dataset.gender, test_dataset.label, np.argmax(y_pred_test, 1))
-
+    
     # print results
     print("*****************************************************************")
     print(f"Evaluation on Test Set:")
@@ -196,15 +196,17 @@ def test(model, test_loader, test_dataset, criterion, return_fairness_eval=False
     print(test_conf)
     print('Fairness Scores (in terms of equal opportunities):')
     fairness_eval.print_equal_opportunities()
+    fairness_eval.print_confusion()
     print("*****************************************************************")
 
     if return_fairness_eval:
         return fairness_eval
 
 if __name__=='__main__':
-    ratio_lst = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    ratio_lst = [0.25]
     for r in ratio_lst:
         for i in range(5):
+            print(r)
             experiment_name = "fairness_dataaug_ratio{}_trial{}".format(r, i)
 
-            train(aug, ratio)
+            train(aug, r)
